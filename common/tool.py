@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import m3u8
 import requests
+from requests.adapters import HTTPAdapter
 
 from common import file_util
 from common.proxy import proxy_pool
@@ -27,11 +28,11 @@ def get_headers():
     }
 
 
-def download_file_ts(uri, file_name, prefix_dir=None):
+def download_file_ts(req_session, uri, file_name, prefix_dir=None):
     try:
         headers = get_headers()
         proxies = proxy_pool.http_proxy_ip()
-        res = requests.get(uri, timeout=30, headers=headers, proxies=proxies, verify=True)
+        res = req_session.get(uri, timeout=30, headers=headers, proxies=proxies, verify=True)
 
         if res.status_code == 200:
             return file_util.save_bytes(res, file_name, prefix_dir)
@@ -41,7 +42,7 @@ def download_file_ts(uri, file_name, prefix_dir=None):
         raise ex
 
 
-def use_thread_pool(pool, retry, tasks, ts_files_local_dir):
+def use_thread_pool(pool, retry, req_session, tasks, ts_files_local_dir):
     print("=" * 20, retry, "=" * 20)
     results, tmp_tasks = [], tasks
 
@@ -49,7 +50,7 @@ def use_thread_pool(pool, retry, tasks, ts_files_local_dir):
     for _01 in tmp_tasks:
         ts_uri, ts_file_name = _01.get('ts_uri'), _01.get('ts_file_name')
         # 将ts文件下载到本地
-        result = pool.submit(download_file_ts, ts_uri, ts_file_name, ts_files_local_dir)
+        result = pool.submit(download_file_ts, req_session, ts_uri, ts_file_name, ts_files_local_dir)
         results.append({
             'ts_uri': ts_uri,
             'ts_file_name': ts_file_name,
@@ -121,7 +122,7 @@ def parsed_m3u8_uri(uri: str):
     return base_host_name, base_path_file_name, base_file_name, base_path_name
 
 
-def just_req_ts_file(thread_num, hls_files_ts, is_variant=False):
+def just_req_ts_file(req_session, thread_num, hls_files_ts, is_variant=False):
     base_host_name, base_path_file_name, base_file_name, base_path_name = parsed_m3u8_uri(str(hls_files_ts.base_uri))
 
     # hls文件，本地存储路径
@@ -149,7 +150,7 @@ def just_req_ts_file(thread_num, hls_files_ts, is_variant=False):
         for retry in range(3):
             if len(tmp_tasks) == 0:
                 break
-            tmp_tasks = use_thread_pool(pool, retry, tmp_tasks, ts_files_local_dir)
+            tmp_tasks = use_thread_pool(pool, retry, req_session, tmp_tasks, ts_files_local_dir)
 
     # 将所有ts文件，合并到一个文件中
     if merge_flag(tasks, ts_files_local_dir):
@@ -163,6 +164,12 @@ def just_req_ts_file(thread_num, hls_files_ts, is_variant=False):
 
 
 def main_seed_url(url: str, thread_num: int = 2):
+    # http https 分别对应各自类型，只是需要分别设置连接数
+    req_session = requests.Session()
+    conn_num = thread_num * 2
+    req_session.mount('https://', HTTPAdapter(pool_connections=conn_num, pool_maxsize=conn_num))
+    req_session.mount('http://', HTTPAdapter(pool_connections=conn_num, pool_maxsize=conn_num))
+
     basic_video = m3u8.load(url, http_client=RequestsClient())
     print('base_uri:', basic_video.base_uri)
 
@@ -170,7 +177,8 @@ def main_seed_url(url: str, thread_num: int = 2):
     if basic_video.is_variant:
         for hls_playlist in basic_video.playlists:
             # 主机地址，资源全路径，资源文件名，资源路径(不包含文件名)
-            base_host_name, base_path_file_name, base_file_name, base_path_name = parsed_m3u8_uri(str(basic_video.base_uri))
+            base_host_name, base_path_file_name, base_file_name, base_path_name = parsed_m3u8_uri(
+                str(basic_video.base_uri))
 
             # hls文件，全路径地址
             hls_playlist_uri = base_host_name + hls_playlist.uri
@@ -178,6 +186,6 @@ def main_seed_url(url: str, thread_num: int = 2):
 
             # 请求获取hls，获取ts文件信息列表
             hls_files_ts = m3u8.load(hls_playlist_uri, http_client=RequestsClient())
-            just_req_ts_file(thread_num, hls_files_ts, is_variant=True)
+            just_req_ts_file(req_session, thread_num, hls_files_ts, is_variant=True)
     else:
-        just_req_ts_file(thread_num, basic_video)
+        just_req_ts_file(req_session, thread_num, basic_video)
