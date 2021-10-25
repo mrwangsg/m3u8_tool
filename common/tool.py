@@ -13,8 +13,12 @@ import m3u8
 import requests
 from requests.adapters import HTTPAdapter
 
+import setting
 from common import file_util
 from common.proxy import proxy_pool
+
+REQ_TIMEOUT = setting.init.get('request_timeout', 30)
+DELETE_TS_DIR = setting.init.get('delete_ts_dir', True)
 
 
 def get_headers():
@@ -32,7 +36,7 @@ def download_file_ts(req_session, uri, file_name, prefix_dir=None):
     try:
         headers = get_headers()
         proxies = proxy_pool.http_proxy_ip()
-        res = req_session.get(uri, timeout=30, headers=headers, proxies=proxies, verify=True)
+        res = req_session.get(uri, timeout=REQ_TIMEOUT, headers=headers, proxies=proxies, verify=True)
 
         if res.status_code == 200:
             return file_util.save_bytes(res, file_name, prefix_dir)
@@ -64,7 +68,7 @@ def use_thread_pool(pool, retry, req_session, tasks, ts_files_local_dir):
     for index, _02 in enumerate(results):
         ts_uri, ts_file_name = _02.get('ts_uri'), _02.get('ts_file_name')
         if _02.get('result').exception():
-            print("异常抛出：", _02.get('result').exception(), str(ts_uri))
+            print("\t异常抛出：", _02.get('result').exception(), str(ts_uri))
             tmp_tasks.append({
                 'ts_uri': ts_uri,
                 'ts_file_name': ts_file_name,
@@ -96,12 +100,44 @@ def filter_has_req_tasks(tasks, ts_files_local_dir):
     return ret_tasks
 
 
-def merge_flag(task, ts_files_local_dir):
+def merge_flag(task, req_cycle_tasks, ts_files_local_dir):
     ts_files = file_util.list_dir_file(ts_files_local_dir)
 
-    if len(ts_files) == len(task):
+    if len(ts_files) + len(req_cycle_tasks) == len(task):
         return True
     return False
+
+
+def decode_ts_file(req_session, hls_files_ts, hls_local_dir):
+    # 将ts文件，按要求解密
+    for key in hls_files_ts.keys:
+        if key is not None and key.absolute_uri is not None:
+            key_url = key.absolute_uri
+            key_file_name = str(key_url).split('/')[-1]
+            download_file_ts(req_session, key_url, key_file_name, prefix_dir=hls_local_dir)
+
+    all_ts_file_with_key = {}
+    for seg in hls_files_ts.segments:
+        key_method, key_iv, key_file_name, key_value = None, None, None, None
+        ts_file_name = str(seg.absolute_uri).split('/')[-1]
+
+        key = seg.key
+        if key is not None:
+            key_method, key_iv = key.method, key.iv
+
+            if key.absolute_uri is not None:
+                key_file_name = str(key.absolute_uri.split('/')[-1])
+                key_value = file_util.read_bytes(key_file_name, prefix_dir=hls_local_dir)
+
+        all_ts_file_with_key[ts_file_name] = {
+            'method': key_method,
+            'iv': key_iv,
+            'key': key_value,
+            'key_file_name': key_file_name,
+            'ts_file_name': ts_file_name,
+        }
+
+    return all_ts_file_with_key
 
 
 def parsed_m3u8_uri(uri: str):
@@ -138,26 +174,37 @@ def just_req_ts_file(req_session, thread_num, hls_files_ts, is_variant=False):
         ts_uri = base_host_name + base_path_name + str(_ts)
         if is_variant:
             ts_uri = base_host_name + base_path_name + str(_ts).split('/')[-1]
+        # 过滤掉后缀不是.ts的文件下载
+        file_name = str(_ts).split('/')[-1]
+        if file_name.endswith('.ts') is False:
+            continue
         tasks.append({
             'ts_uri': ts_uri,
             'ts_file_name': str(_ts).split('/')[-1],
         })
-    filter_tasks = filter_has_req_tasks(tasks, ts_files_local_dir)
+
+    # 过滤出：需要请求的任务
+    req_cycle_tasks = filter_has_req_tasks(tasks, ts_files_local_dir)
 
     # 使用线程池
     with ThreadPoolExecutor(max_workers=thread_num) as pool:
-        tmp_tasks = filter_tasks
         for retry in range(3):
-            if len(tmp_tasks) == 0:
+            if len(req_cycle_tasks) == 0:
                 break
-            tmp_tasks = use_thread_pool(pool, retry, req_session, tmp_tasks, ts_files_local_dir)
+            req_cycle_tasks = use_thread_pool(pool, retry, req_session, req_cycle_tasks, ts_files_local_dir)
+
+    # 准备好解密相关的信息
+    all_ts_file_with_key = decode_ts_file(req_session, hls_files_ts, hls_local_dir)
 
     # 将所有ts文件，合并到一个文件中
-    if merge_flag(tasks, ts_files_local_dir):
-        ts_file_name_list, merge_files_ts = [], base_file_name + "_.ts"
+    if merge_flag(tasks, req_cycle_tasks, ts_files_local_dir):
+        ts_file_name_list, merge_files_name = [], base_file_name + "_.ts"
         for _ in tasks:
+            if _ in req_cycle_tasks:
+                continue
             ts_file_name_list.append(_.get('ts_file_name'))
-        file_util.merge_all_ts(merge_files_ts, hls_local_dir, ts_files_local_dir, ts_file_name_list)
+        file_util.merge_all_ts(merge_files_name, hls_local_dir, ts_files_local_dir, ts_file_name_list,
+                               all_ts_file_with_key, DELETE_TS_DIR)
         print("合并ts文件结束！")
     else:
         print('ts文件不足，无法合并！！！')

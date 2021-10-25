@@ -14,7 +14,7 @@ from common import tool
 
 def main():
     m3u8_url_list = setting.m3u8_url_list
-    thread_num = setting.thread_num
+    thread_num = setting.init.get('thread_num', 5)
 
     for url in m3u8_url_list:
         tool.main_seed_url(url, thread_num)

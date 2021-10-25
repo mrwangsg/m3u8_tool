@@ -8,8 +8,11 @@
 
 # m3u8初始地址
 m3u8_url_list = [
+    'https://v3.dious.cc/20201127/y2zBQ8rr/index.m3u8',
     'http://cctvalih5ca.v.myalicdn.com/live/cctv1_2/index.m3u8',
 ]
-
-# 线程数
-thread_num = 5
+init = {
+    'thread_num': 5,  # 线程数
+    'request_timeout': 10,  # 请求超时时长
+    'delete_ts_dir': False,  # 请求结束后，是否删除ts文件夹
+}
