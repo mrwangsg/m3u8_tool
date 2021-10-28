@@ -158,7 +158,7 @@ def parsed_m3u8_uri(uri: str):
     return base_host_name, base_path_file_name, base_file_name, base_path_name
 
 
-def just_req_ts_file(req_session, thread_num, hls_files_ts, is_variant=False):
+def just_req_ts_file(req_session, thread_num, hls_files_ts):
     base_host_name, base_path_file_name, base_file_name, base_path_name = parsed_m3u8_uri(str(hls_files_ts.base_uri))
 
     # hls文件，本地存储路径
@@ -171,12 +171,12 @@ def just_req_ts_file(req_session, thread_num, hls_files_ts, is_variant=False):
     # 整理好任务
     tasks = []
     for _ts in hls_files_ts.files:
-        ts_uri = base_host_name + base_path_name + str(_ts)
-        if is_variant:
-            ts_uri = base_host_name + base_path_name + str(_ts).split('/')[-1]
+        ts_uri = base_host_name + base_path_name + str(_ts).split('/')[-1]
+        if str(_ts).startswith('http:') or str(_ts).startswith('https:'):
+            ts_uri = _ts
         # 过滤掉后缀不是.ts的文件下载
         file_name = str(_ts).split('/')[-1]
-        if file_name.endswith('.ts') is False:
+        if '.' in file_name and file_name.endswith('.ts') is False:
             continue
         tasks.append({
             'ts_uri': ts_uri,
@@ -233,6 +233,6 @@ def main_seed_url(url: str, thread_num: int = 2):
 
             # 请求获取hls，获取ts文件信息列表
             hls_files_ts = m3u8.load(hls_playlist_uri, http_client=RequestsClient())
-            just_req_ts_file(req_session, thread_num, hls_files_ts, is_variant=True)
+            just_req_ts_file(req_session, thread_num, hls_files_ts)
     else:
         just_req_ts_file(req_session, thread_num, basic_video)
