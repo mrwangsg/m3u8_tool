@@ -8,8 +8,11 @@
 
 # m3u8初始地址
 m3u8_url_list = [
-    'https://vod3.bdzybf3.com/20210126/daVjOiFo/index.m3u8',
-    'http://cctvalih5ca.v.myalicdn.com/live/cctv1_2/index.m3u8',
+
+    # 'https://v11.tkzyapi.com/20211014/X8jAuzWN/index.m3u8',  # 第一集
+    # 'https://v11.tkzyapi.com/20211014/0TTDJnzy/index.m3u8',  # 第二集
+    # 'https://v11.tkzyapi.com/20211014/x519OC8D/index.m3u8',  # 第三集
+
 ]
 init = {
     'thread_num': 6,  # 线程数

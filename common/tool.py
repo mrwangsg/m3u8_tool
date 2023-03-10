@@ -119,14 +119,14 @@ def decode_ts_file(req_session, hls_files_ts, hls_local_dir):
     all_ts_file_with_key = {}
     for seg in hls_files_ts.segments:
         key_method, key_iv, key_file_name, key_value = None, None, None, None
-        ts_file_name = str(seg.absolute_uri).split('/')[-1]
+        ts_file_name = str(seg.absolute_uri).split('/')[-1].split('?')[0]
 
         key = seg.key
         if key is not None:
             key_method, key_iv = key.method, key.iv
 
             if key.absolute_uri is not None:
-                key_file_name = str(key.absolute_uri.split('/')[-1])
+                key_file_name = str(key.absolute_uri.split('/')[-1].split('?')[0])
                 key_value = file_util.read_bytes(key_file_name, prefix_dir=hls_local_dir)
 
         all_ts_file_with_key[ts_file_name] = {
@@ -163,6 +163,9 @@ def just_req_ts_file(req_session, thread_num, hls_files_ts):
 
     # hls文件，本地存储路径
     hls_local_dir = base_path_name.replace('/', '_')
+    # 限制路径长度为30
+    if len(hls_local_dir) > 30:
+        hls_local_dir = hls_local_dir[:30]
     file_util.save_text(hls_files_ts.dumps(), base_file_name, hls_local_dir)
 
     # ts文件，本地存储路径
@@ -175,12 +178,12 @@ def just_req_ts_file(req_session, thread_num, hls_files_ts):
         if str(_ts).startswith('http:') or str(_ts).startswith('https:'):
             ts_uri = _ts
         # 过滤掉后缀不是.ts的文件下载
-        file_name = str(_ts).split('/')[-1]
+        file_name = str(_ts).split('/')[-1].split('?')[0]
         if '.' in file_name and file_name.endswith('.ts') is False:
             continue
         tasks.append({
             'ts_uri': ts_uri,
-            'ts_file_name': str(_ts).split('/')[-1],
+            'ts_file_name': str(_ts).split('/')[-1].split('?')[0],
         })
 
     # 过滤出：需要请求的任务
@@ -221,6 +224,7 @@ def main_seed_url(url: str, thread_num: int = 2):
     print('base_uri:', basic_video.base_uri)
 
     # 媒体播放列表
+    # is_variant，表示可变不同版本的流文件
     if basic_video.is_variant:
         for hls_playlist in basic_video.playlists:
             # 主机地址，资源全路径，资源文件名，资源路径(不包含文件名)
